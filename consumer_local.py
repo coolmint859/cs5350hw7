@@ -1,6 +1,3 @@
-import boto3
-import sys
-import time
 import os
 import json
 import logging
@@ -107,22 +104,9 @@ def create_logger():
 def main():
     logger = create_logger()
 
-    max_wait_time = 5  # wait time 5 seconds
-    curr_wait_time = 0
-
     widgets = get_widgets()
     for widget in widgets:
         process_widget(logger, widget)
-
-    # while curr_wait_time <= max_wait_time:
-    #     widget = get_next_widget()
-    #     if widget is not None:
-    #         process_widget(widget)
-    #         curr_wait_time = 0
-    #     else:
-    #         # print("zzzzzz...." + str(curr_wait_time))
-    #         time.sleep(0.1)
-    #         curr_wait_time += 0.1
 
 
 if __name__ == "__main__":

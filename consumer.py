@@ -52,6 +52,7 @@ def get_next_widget(logger, s3_client, bucket_name, download_path):
     return widget, min_key
 
 
+# this should eventually upload a created widget to a given s3 bucket
 def push_widget(logger, widget_obj):
     bucket_owner = widget_obj['owner'].replace(" ", "-").lower()
     bucket_id = widget_obj['widgetId']
@@ -62,6 +63,8 @@ def push_widget(logger, widget_obj):
 
     with open(widget_path + f"{bucket_id}.json", 'w') as widget_file:
         json.dump(widget_obj, widget_file)
+
+    logger.info(f"Uploaded widget in {widget_path} as {bucket_id}.json")
 
 
 def widget_contains_required_keys(logger, widget_data):
@@ -125,15 +128,14 @@ def main():
         widget, key = get_next_widget(logger, s3, bucket_name, download_path)
         if widget is not None:
             print(widget)
-            # process_widget(logger, widget)
+            process_widget(logger, widget)
             s3.delete_object(Bucket=bucket_name, Key=key)
             curr_wait_time = 0
         else:
-            # print(curr_wait_time)
             time.sleep(0.1)
             curr_wait_time += 0.1
 
-    logger.info(f"No new requests found within the last {max_wait_time} seconds, terminating programs.")
+    logger.info(f"No new requests found within the last {max_wait_time} seconds, terminating program.")
 
 
 if __name__ == "__main__":
