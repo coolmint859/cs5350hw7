@@ -94,7 +94,7 @@ def create_logger():
     logger.addHandler(consoleHandler)
 
     logging.basicConfig(
-        filename="consumer_logs.txt",
+        filename="consumer.log",
         filemode='w',
         format="{asctime} {levelname} {name}: {message}",
         style="{",
