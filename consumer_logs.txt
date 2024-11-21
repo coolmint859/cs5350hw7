@@ -1,0 +1,34 @@
+22:30:17 INFO __main__: Updated Widget
+22:30:17 INFO __main__: Updated Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Deleted Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Updated Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Updated Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Deleted Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Deleted Widget
+22:30:17 INFO __main__: Updated Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Deleted Widget
+22:30:17 INFO __main__: Updated Widget
+22:30:17 INFO __main__: Updated Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 WARNING __main__: Widget Missing Required Key 'owner', Skipping...
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Updated Widget
+22:30:17 INFO __main__: Deleted Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 WARNING __main__: Widget Type 'bad' is an Invalid Type, Skipping...
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Updated Widget
+22:30:17 INFO __main__: Created Widget
+22:30:17 INFO __main__: Updated Widget
