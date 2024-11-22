@@ -1,9 +1,13 @@
 import boto3
-import sys
-import os
+import click
 import time
 import json
 import logging
+
+
+@click.group()
+def commands():
+    pass
 
 
 def create_widget(logger, widget_data):
@@ -22,19 +26,17 @@ def create_widget(logger, widget_data):
 
 
 def delete_widget(logger, widget_data):
-    # logger.info(f"Deleted Widget {widget_obj['widgetID']}")
     logger.info(f"Deleted Widget")
 
     return widget_data
 
 
 def update_widget(logger, widget_data):
-    # logger.info(f"Created New Widget {widget_obj['widgetID']}")
     logger.info(f"Updated Widget")
     return widget_data
 
 
-def get_next_widget(logger, s3_client, bucket_name):
+def get_next_request(logger, s3_client, bucket_name):
     requests = s3_client.list_objects_v2(Bucket=bucket_name).get("Contents")
 
     if requests is None:
@@ -50,7 +52,7 @@ def get_next_widget(logger, s3_client, bucket_name):
     return widget, min_key
 
 
-def push_widget(logger, s3_client, widget_obj, bucket_name):
+def push_widget_s3(logger, s3_client, widget_obj, bucket_name):
     bucket_owner = widget_obj['owner'].replace(" ", "-").lower()
 
     widget_path = f"widgets/{bucket_owner}/"
@@ -58,10 +60,14 @@ def push_widget(logger, s3_client, widget_obj, bucket_name):
     widget = json.dumps(widget_obj)
     s3_client.put_object(Bucket=bucket_name, Key=widget_path, Body=widget)
 
-    # logger.info(f"Uploaded widget in {widget_path} as {widget_obj['widgetId']}.json")
+    logger.info(f"Uploaded widget in {widget_path} as {widget_obj['widgetId']}.json")
 
 
-def widget_contains_required_keys(logger, widget_data):
+def push_widget_dynamodb(logger, db_client, widget_obk, table_name):
+    pass
+
+
+def request_contains_required_keys(logger, widget_data):
     with open("widgetRequest-schema.json") as schema_file:
         schema = json.load(schema_file)
 
@@ -72,8 +78,8 @@ def widget_contains_required_keys(logger, widget_data):
     return True
 
 
-def process_widget(logger, s3_client, widget, widget_bucket_name):
-    if not widget_contains_required_keys(logger, widget):
+def process_request(logger, request):
+    if not request_contains_required_keys(logger, request):
         return
 
     accepted_types = {
@@ -82,11 +88,12 @@ def process_widget(logger, s3_client, widget, widget_bucket_name):
         "update": update_widget
     }
 
-    if widget['type'] in accepted_types:
-        widget_obj = accepted_types[widget['type']](logger, widget)
-        push_widget(logger, s3_client, widget_obj, widget_bucket_name)
+    if request['type'] in accepted_types:
+        widget_obj = accepted_types[request['type']](logger, request)
+        return widget_obj
     else:
-        logger.warning(f"Widget Type '{widget['type']}' is an Invalid Type, Skipping...")
+        logger.warning(f"Widget Type '{request['type']}' is an Invalid Type, Skipping...")
+        return None
 
 
 def create_logger():
@@ -107,23 +114,50 @@ def create_logger():
     return logger
 
 
-def main():
+@click.command()
+@click.option("--request-bucket", "-rb", help="The bucket to pull requests from.")
+@click.option("--dynamodb-table", "-dbt", help="The dynamodb table to fulfill requests on.")
+@click.option("--max-wait-time", "-mwt", default=3, help="The max wait time in seconds without finding a request")
+def save_to_dynamodb(request_bucket: str, dynamodb_table: str, max_wait_time: int):
+    if request_bucket is None:
+        click.echo("Missing request-bucket option. type --help to see usage.")
+        return
+    elif dynamodb_table is None:
+        click.echo("Missing dynamodb-table option. type --help to see usage.")
+        return
+
+    click.echo(f"request-bucket={request_bucket}, dynamodb-table={dynamodb_table}, wait-time={max_wait_time}")
+
+
+@click.command()
+@click.option("--request-bucket", "-rb", help="The bucket to pull requests from.")
+@click.option("--widget-bucket", "-wb", help="The bucket to fulfill requests on.")
+@click.option("--max-wait-time", "-mwt", default=3, help="The max wait time in seconds before finding a request")
+def save_to_s3(request_bucket: str, widget_bucket: str, max_wait_time: int):
+    if request_bucket is None:
+        click.echo("Missing request-bucket option. type --help to see usage.")
+        return
+    elif widget_bucket is None:
+        click.echo("Missing widget-bucket option. type --help to see usage.")
+        return
+
     logger = create_logger()
 
     s3 = boto3.client('s3')
-
-    request_bucket_name = "usu-cs5250-coolmint-requests"
-    widget_bucket_name = "usu-cs5250-coolmint-web"
-
-    max_wait_time = 3  # wait time without finding a request before program terminates
     curr_wait_time = 0
 
     while curr_wait_time <= max_wait_time:
-        widget, key = get_next_widget(logger, s3, request_bucket_name)
-        if widget is not None:
-            # print(type(widget), widget)
-            process_widget(logger, s3, widget, widget_bucket_name)
-            s3.delete_object(Bucket=request_bucket_name, Key=key)
+        request, key = get_next_request(logger, s3, request_bucket)
+        if request is not None:
+            widget = process_request(logger, request)
+
+            if widget is None:
+                continue
+
+            push_widget_s3(logger, s3, widget, widget_bucket)
+
+            s3.delete_object(Bucket=request_bucket, Key=key)
+            logger.info(f"Fulfilled request '{key}', finding next request...")
             curr_wait_time = 0
         else:
             time.sleep(0.1)
@@ -132,5 +166,9 @@ def main():
     logger.info(f"No new requests found within the last {max_wait_time} seconds, terminating program.")
 
 
+commands.add_command(save_to_dynamodb)
+commands.add_command(save_to_s3)
+
+
 if __name__ == "__main__":
-    main()
+    commands()
