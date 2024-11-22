@@ -17,21 +17,24 @@ def create_widget(logger, widget_data):
     if 'label' in widget_data.keys():
         widget_obj["label"] = widget_data["label"]
 
-    logger.info("Created Widget")
+    logger.info(f"Created New Widget {widget_obj['widgetId']}")
     return widget_obj
 
 
 def delete_widget(logger, widget_data):
-    logger.info("Deleted Widget")
+    # logger.info(f"Deleted Widget {widget_obj['widgetID']}")
+    logger.info(f"Deleted Widget")
+
     return widget_data
 
 
 def update_widget(logger, widget_data):
-    logger.info("Updated Widget")
+    # logger.info(f"Created New Widget {widget_obj['widgetID']}")
+    logger.info(f"Updated Widget")
     return widget_data
 
 
-def get_next_widget(logger, s3_client, bucket_name, download_path):
+def get_next_widget(logger, s3_client, bucket_name):
     requests = s3_client.list_objects_v2(Bucket=bucket_name).get("Contents")
 
     if requests is None:
@@ -40,31 +43,22 @@ def get_next_widget(logger, s3_client, bucket_name, download_path):
     request_keys = [obj["Key"] for obj in list(requests)]
     min_key = min(request_keys)
 
-    if not os.path.exists(download_path):
-        os.makedirs(download_path)
-
-    s3_client.download_file(bucket_name, min_key, download_path + min_key)
-    logger.info(f"Loaded object with key '{min_key}' from bucket '{bucket_name}'")
-
-    with open(download_path + min_key) as dnl_file:
-        widget = json.load(dnl_file)
+    response = s3_client.get_object(Bucket=bucket_name, Key=min_key)
+    object_content = response["Body"].read().decode("utf-8")
+    widget = json.loads(object_content)
 
     return widget, min_key
 
 
-# this should eventually upload a created widget to a given s3 bucket
-def push_widget(logger, widget_obj):
+def push_widget(logger, s3_client, widget_obj, bucket_name):
     bucket_owner = widget_obj['owner'].replace(" ", "-").lower()
-    bucket_id = widget_obj['widgetId']
-    widget_path = f"sample_responses/{bucket_owner}/"
 
-    if not os.path.exists(widget_path):
-        os.makedirs(widget_path)
+    widget_path = f"widgets/{bucket_owner}/"
 
-    with open(widget_path + f"{bucket_id}.json", 'w') as widget_file:
-        json.dump(widget_obj, widget_file)
+    widget = json.dumps(widget_obj)
+    s3_client.put_object(Bucket=bucket_name, Key=widget_path, Body=widget)
 
-    logger.info(f"Uploaded widget in {widget_path} as {bucket_id}.json")
+    # logger.info(f"Uploaded widget in {widget_path} as {widget_obj['widgetId']}.json")
 
 
 def widget_contains_required_keys(logger, widget_data):
@@ -78,7 +72,7 @@ def widget_contains_required_keys(logger, widget_data):
     return True
 
 
-def process_widget(logger, widget):
+def process_widget(logger, s3_client, widget, widget_bucket_name):
     if not widget_contains_required_keys(logger, widget):
         return
 
@@ -90,7 +84,7 @@ def process_widget(logger, widget):
 
     if widget['type'] in accepted_types:
         widget_obj = accepted_types[widget['type']](logger, widget)
-        push_widget(logger, widget_obj)
+        push_widget(logger, s3_client, widget_obj, widget_bucket_name)
     else:
         logger.warning(f"Widget Type '{widget['type']}' is an Invalid Type, Skipping...")
 
@@ -118,18 +112,18 @@ def main():
 
     s3 = boto3.client('s3')
 
-    bucket_name = "usu-cs5250-coolmint-requests"
-    download_path = "downloaded-requests/"
+    request_bucket_name = "usu-cs5250-coolmint-requests"
+    widget_bucket_name = "usu-cs5250-coolmint-web"
 
     max_wait_time = 3  # wait time without finding a request before program terminates
     curr_wait_time = 0
 
     while curr_wait_time <= max_wait_time:
-        widget, key = get_next_widget(logger, s3, bucket_name, download_path)
+        widget, key = get_next_widget(logger, s3, request_bucket_name)
         if widget is not None:
-            print(widget)
-            process_widget(logger, widget)
-            s3.delete_object(Bucket=bucket_name, Key=key)
+            # print(type(widget), widget)
+            process_widget(logger, s3, widget, widget_bucket_name)
+            s3.delete_object(Bucket=request_bucket_name, Key=key)
             curr_wait_time = 0
         else:
             time.sleep(0.1)
