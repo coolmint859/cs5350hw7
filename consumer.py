@@ -5,16 +5,16 @@ import json
 import logging
 
 
-def create_widget(logger, widget_data: dict[str: str]) -> dict[str: str]:
-    widget_obj = {"widgetId": widget_data["widgetId"],
-                  "owner": widget_data["owner"],
-                  "description": widget_data["description"]}
+def create_widget(logger, request_data: dict[str: str]) -> dict[str: str]:
+    widget_obj = {"widgetId": request_data["widgetId"],
+                  "owner": request_data["owner"],
+                  "description": request_data["description"]}
 
-    if 'otherAttributes' in widget_data.keys():
-        widget_obj["otherAttributes"] = widget_data["otherAttributes"]
+    if 'otherAttributes' in request_data.keys():
+        widget_obj["otherAttributes"] = request_data["otherAttributes"]
 
-    if 'label' in widget_data.keys():
-        widget_obj["label"] = widget_data["label"]
+    if 'label' in request_data.keys():
+        widget_obj["label"] = request_data["label"]
 
     logger.info(f"Created New Widget {widget_obj['widgetId']}")
     return widget_obj
