@@ -20,33 +20,54 @@ def create_widget(logger, request_data: dict[str: str]) -> dict[str: str]:
     return widget_obj
 
 
-def delete_widget(logger, widget_data: dict[str: str]):
+def delete_widget(logger, request_data: dict[str: str]):
     logger.info(f"Deleted Widget")
 
-    return widget_data
 
-
-def update_widget(logger, widget_data: dict[str: str]):
+def update_widget(logger, request_data: dict[str: str]):
     logger.info(f"Updated Widget")
-    return widget_data
+    return request_data
 
 
-def get_next_request(logger, s3_client, bucket_name: str) -> (dict[str: str], int):
+def get_next_request(logger, user_info: dict[str: str]) -> (dict[str: str], int):
+    if user_info["REQUEST_BUCKET"]:
+        return get_request_s3(logger, user_info["REQUEST_BUCKET"])
+    else:
+        return get_request_sqs(logger, user_info["SQS_QUEUE"])
+
+
+def get_request_s3(logger, bucket_name):
+    s3_client = boto3.client('s3')
     requests = s3_client.list_objects_v2(Bucket=bucket_name).get("Contents")
 
     if requests is None:
-        return None, None
+        return None
 
     request_keys = [obj["Key"] for obj in list(requests)]
     min_key = min(request_keys)
 
     response = s3_client.get_object(Bucket=bucket_name, Key=min_key)
     object_content = response["Body"].read().decode("utf-8")
-    widget = json.loads(object_content)
+    request = json.loads(object_content)
+    request['key'] = min_key
 
+    logger.debug(f"Retrieved request {request['widgetId']}")
+
+    return request
+
+
+def get_request_sqs(logger, sqs_queue):
+    widget = {"widgetID": "<Id goes here>"}
     logger.debug(f"Retrieved request {widget['widgetId']}")
 
-    return widget, min_key
+    return None
+
+
+def save_widget(logger, widget_obj, widget_loc):
+    if widget_loc["WIDGET_BUCKET"]:
+        save_to_s3(logger, widget_obj, widget_loc["WIDGET_BUCKET"])
+    else:
+        save_to_dynamodb(logger, widget_obj, widget_loc["DYNAMODB_TABLE"])
 
 
 def save_to_s3(logger, widget_obj: dict[str: str], bucket_name: str) -> None:
@@ -81,33 +102,50 @@ def save_to_dynamodb(logger, widget_obj: dict[str: str], table_name: str) -> Non
     logger.debug(f"Uploaded widget in '{table_name}' table as {widget_obj['widgetId']}")
 
 
-def request_contains_required_keys(logger, widget_data: dict[str: str]) -> bool:
+def delete_request(logger, request_data: dict[str: str], request_loc: dict["str": str]) -> None:
+    if request_loc["REQUEST_BUCKET"]:
+        bucket = request_loc["REQUEST_BUCKET"]
+        key = request_data["key"]
+
+        # print(bucket, key)
+
+        s3_client = boto3.client('s3')
+        s3_client.delete_object(Bucket=bucket, Key=key)
+        logger.debug(f"Deleted Request {request_data['requestId']}")
+    else:
+        sqs_client = boto3.client('sqs')
+
+
+def process_request(logger, request: dict[str: str], user_info: dict["str": "str"]) -> None:
+    if request['type'] == 'create':
+        widget = create_widget(logger, request)
+        save_widget(logger, widget, user_info["WIDGET_LOC"])
+        delete_request(logger, request, user_info["REQUEST_LOC"])
+    elif request['type'] == 'update':
+        widget = update_widget(logger, request)
+        save_widget(logger, widget, user_info["WIDGET_LOC"])
+        delete_request(logger, request, user_info["REQUEST_LOC"])
+    else:  # widget should be deleted (if exists)
+        delete_widget(logger, request)
+        delete_request(logger, request, user_info["REQUEST_LOC"])
+
+
+def is_valid_request(logger, request: dict[str: str]) -> bool:
     with open("widgetRequest-schema.json") as schema_file:
         schema = json.load(schema_file)
 
         for key in schema['required']:
-            if key not in widget_data:
-                logger.warning(f"Widget Missing Required Key '{key}', Skipping...")
+            if key not in request:
+                logger.warning(f"Request Missing '{key}', Skipping...")
                 return False
-    return True
 
+    accepted_request_types = ["create", "delete", "update"]
 
-def process_request(logger, request: dict[str: str]) -> dict[str: str]:
-    if not request_contains_required_keys(logger, request):
-        return
-
-    accepted_types = {
-        "create": create_widget,
-        "delete": delete_widget,
-        "update": update_widget
-    }
-
-    if request['type'] in accepted_types:
-        widget_obj = accepted_types[request['type']](logger, request)
-        return widget_obj
+    if request['type'] in accepted_request_types:
+        return True
     else:
         logger.warning(f"Widget Type '{request['type']}' is an Invalid Type, Skipping...")
-        return None
+        return False
 
 
 def create_logger(debug, save_file) -> logging.Logger:
@@ -131,25 +169,17 @@ def create_logger(debug, save_file) -> logging.Logger:
 def main(user_info: dict[str: str]) -> None:
     logger = create_logger(user_info["DEBUG"], "logs/consumer.log")
 
-    s3 = boto3.client('s3')
     curr_wait_time = 0
-
     while curr_wait_time <= user_info["MAX_WAIT_TIME"]:
-        request, key = get_next_request(logger, s3, user_info["REQUEST_BUCKET"])
+        request = get_next_request(logger, user_info["REQUEST_LOC"])
         if request is not None:
-            widget = process_request(logger, request)
-
-            if widget is None:
+            if not is_valid_request(logger, request):
+                print(request)
                 continue
 
-            if "WIDGET_BUCKET" in user_info.keys():
-                save_to_s3(logger, widget, user_info["WIDGET_BUCKET"])
-            else:
-                save_to_dynamodb(logger, widget, user_info["DYNAMODB_TABLE"])
+            process_request(logger, request, user_info)
 
-
-            s3.delete_object(Bucket=user_info["REQUEST_BUCKET"], Key=key)
-            logger.debug(f"Fulfilled request '{key}', finding next request...\n")
+            logger.debug(f"Fulfilled request '{request['requestId']}', finding next request...\n")
             curr_wait_time = 0
         else:
             time.sleep(0.1)
@@ -160,29 +190,35 @@ def main(user_info: dict[str: str]) -> None:
 
 
 @click.group(invoke_without_command=True)
-@click.option("--request-bucket", "-rb", help="Name of s3 bucket that may contain requests.", required=True)
+@click.option("--request-bucket", "-rb", help="Name of the s3 bucket that may contain requests.")
+@click.option("--request-queue", "-rq", help="URL of the SQS queue that may contain requests.")
 @click.option("--widget-bucket", "-wb", help="Name of the s3 bucket that may contain widgets.")
 @click.option("--dynamodb-table", "-dbt", help="Name of the dynamodb table that may contain widgets.")
 @click.option("--max-wait-time", "-mwt", default=3, help="The max wait time in seconds without finding a request")
-@click.option("--debug/--no-debug", default=False, help="If set, will print information for each step of the process.")
-def cli(request_bucket, widget_bucket, dynamodb_table, max_wait_time, debug):
-    if widget_bucket and dynamodb_table:
-        click.echo("Error, Mismatched Options. To see possible parameters, type '--help'.")
+@click.option("--debug/--no-debug", default=False, help="If set, will print information about fetching and processing requests.")
+def cli(request_bucket, request_queue, widget_bucket, dynamodb_table, max_wait_time, debug):
+    if (widget_bucket and dynamodb_table) or (request_bucket and request_queue):
+        logging.error("Mismatched Options. To see more information, type '--help'.")
+        return
+    if not (request_bucket or request_queue):
+        logging.error("Missing the Request Location. To see more information, type '--help'.")
         return
     if not (widget_bucket or dynamodb_table):
-        click.echo("Error, Missing the Widget Location. To see more information, type '--help'.")
+        logging.error("Missing the Widget Location. To see more information, type '--help'.")
         return
 
-    user_info = {'REQUEST_LOC': 's3',
-                 'REQUEST_BUCKET': request_bucket}
-
-    if widget_bucket is not None:
-        user_info['WIDGET_BUCKET'] = widget_bucket
-    else:
-        user_info['DYNAMODB_TABLE'] = dynamodb_table
-
-    user_info["MAX_WAIT_TIME"] = max_wait_time
-    user_info["DEBUG"] = debug
+    user_info = {
+        "REQUEST_LOC": {
+            "REQUEST_BUCKET": request_bucket,
+            "REQUEST_QUEUE": request_queue
+        },
+        "WIDGET_LOC": {
+            "WIDGET_BUCKET": widget_bucket,
+            "DYNAMODB_TABLE": dynamodb_table
+        },
+        "MAX_WAIT_TIME": max_wait_time,
+        "DEBUG": debug
+    }
 
     main(user_info)
 
