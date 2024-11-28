@@ -16,17 +16,47 @@ def create_widget(logger, request_data: dict[str: str]) -> dict[str: str]:
     if 'label' in request_data.keys():
         widget_obj["label"] = request_data["label"]
 
-    logger.info(f"Created New Widget {widget_obj['widgetId']}")
+    logger.info(f"Created Widget {widget_obj['widgetId']}")
     return widget_obj
 
 
-def delete_widget(logger, request_data: dict[str: str]):
-    logger.info(f"Deleted Widget")
+def delete_widget(logger, request_data: dict[str: str], widget_loc: dict[str: str]) -> None:
+    # logger.info("Deleted Widget")
+    if widget_loc["WIDGET_BUCKET"]:
+        # widget is in an s3 bucket
+        s3_client = boto3.client('s3')
+
+        bucket_owner = request_data['owner'].replace(" ", "-").lower()
+        widget_path = f"widgets/{bucket_owner}/"
+        bucket_name = widget_loc["WIDGET_BUCKET"]
+
+        try:
+            s3_client.get_object(Bucket=bucket_name, Key=widget_path)
+        except s3_client.exceptions.NoSuchKey:
+            logger.warning(f"Could not delete widget '{request_data['widgetId']}', widget does not exist.")
+            return
+
+        s3_client.delete_object(Bucket=bucket_name, Key=widget_path)
+        logger.info(f"Deleted Widget {request_data['widgetId']}")
+    else:
+        # widget is in a dynamodb table
+        pass
+
 
 
 def update_widget(logger, request_data: dict[str: str]):
-    logger.info(f"Updated Widget")
-    return request_data
+    new_widget = {"widgetId": request_data["widgetId"],
+                  "owner": request_data["owner"],
+                  "description": request_data["description"]}
+
+    if 'otherAttributes' in request_data.keys():
+        new_widget["otherAttributes"] = request_data["otherAttributes"]
+
+    if 'label' in request_data.keys():
+        new_widget["label"] = request_data["label"]
+
+    logger.info(f"Updated Widget {new_widget['widgetId']}")
+    return new_widget
 
 
 def get_next_request(logger, user_info: dict[str: str]) -> (dict[str: str], int):
@@ -38,18 +68,21 @@ def get_next_request(logger, user_info: dict[str: str]) -> (dict[str: str], int)
 
 def get_request_s3(logger, bucket_name):
     s3_client = boto3.client('s3')
-    requests = s3_client.list_objects_v2(Bucket=bucket_name).get("Contents")
+
+    # list_objects_v2 appears to always list in ascending order (likely the order the objects were uploaded),
+    # so the first object in the list will always be the one with the smallest key
+    requests = s3_client.list_objects_v2(Bucket=bucket_name, MaxKeys=1).get("Contents")
 
     if requests is None:
         return None
 
-    request_keys = [obj["Key"] for obj in list(requests)]
-    min_key = min(request_keys)
+    request_key = list(requests)[0]["Key"]
 
-    response = s3_client.get_object(Bucket=bucket_name, Key=min_key)
+    response = s3_client.get_object(Bucket=bucket_name, Key=request_key)
     object_content = response["Body"].read().decode("utf-8")
+
     request = json.loads(object_content)
-    request['key'] = min_key
+    request['key'] = request_key
 
     logger.debug(f"Retrieved request {request['widgetId']}")
 
@@ -121,13 +154,19 @@ def process_request(logger, request: dict[str: str], user_info: dict["str": "str
         widget = create_widget(logger, request)
         save_widget(logger, widget, user_info["WIDGET_LOC"])
         delete_request(logger, request, user_info["REQUEST_LOC"])
+
     elif request['type'] == 'update':
         widget = update_widget(logger, request)
         save_widget(logger, widget, user_info["WIDGET_LOC"])
         delete_request(logger, request, user_info["REQUEST_LOC"])
-    else:  # widget should be deleted (if exists)
-        delete_widget(logger, request)
+
+    elif request['type'] == 'delete':
+        delete_widget(logger, request, user_info["WIDGET_LOC"])
         delete_request(logger, request, user_info["REQUEST_LOC"])
+
+    else:
+        logger.warning(f"Widget Type '{request['type']}' is an Invalid Type, Skipping...")
+
 
 
 def is_valid_request(logger, request: dict[str: str]) -> bool:
@@ -138,14 +177,7 @@ def is_valid_request(logger, request: dict[str: str]) -> bool:
             if key not in request:
                 logger.warning(f"Request Missing '{key}', Skipping...")
                 return False
-
-    accepted_request_types = ["create", "delete", "update"]
-
-    if request['type'] in accepted_request_types:
-        return True
-    else:
-        logger.warning(f"Widget Type '{request['type']}' is an Invalid Type, Skipping...")
-        return False
+    return True
 
 
 def create_logger(debug, save_file) -> logging.Logger:
@@ -174,7 +206,7 @@ def main(user_info: dict[str: str]) -> None:
         request = get_next_request(logger, user_info["REQUEST_LOC"])
         if request is not None:
             if not is_valid_request(logger, request):
-                print(request)
+                print("Invalid", type(request), request)
                 continue
 
             process_request(logger, request, user_info)
