@@ -3,12 +3,12 @@ import click
 import time
 import json
 import logging
+import jsonschema
 
 
-def create_widget(logger, request_data: dict[str: str]) -> dict[str: str]:
+def create_widget(logger, request_data: dict[str: str], log=True) -> dict[str: str]:
     widget_obj = {"widgetId": request_data["widgetId"],
-                  "owner": request_data["owner"],
-                  "description": request_data["description"]}
+                  "owner": request_data["owner"]}
 
     if 'otherAttributes' in request_data.keys():
         widget_obj["otherAttributes"] = request_data["otherAttributes"]
@@ -16,38 +16,58 @@ def create_widget(logger, request_data: dict[str: str]) -> dict[str: str]:
     if 'label' in request_data.keys():
         widget_obj["label"] = request_data["label"]
 
-    logger.info(f"Created Widget {widget_obj['widgetId']}")
+    if 'description' in request_data.keys():
+        widget_obj["description"] = request_data["description"]
+
+    if log:
+        logger.info(f"Created Widget '{widget_obj['widgetId']}'")
     return widget_obj
 
 
 def delete_widget(logger, request_data: dict[str: str], widget_loc: dict[str: str]) -> None:
-    # logger.info("Deleted Widget")
     if widget_loc["WIDGET_BUCKET"]:
-        # widget is in an s3 bucket
-        s3_client = boto3.client('s3')
-
-        bucket_owner = request_data['owner'].replace(" ", "-").lower()
-        widget_path = f"widgets/{bucket_owner}/"
-        bucket_name = widget_loc["WIDGET_BUCKET"]
-
-        try:
-            s3_client.get_object(Bucket=bucket_name, Key=widget_path)
-        except s3_client.exceptions.NoSuchKey:
-            logger.warning(f"Could not delete widget '{request_data['widgetId']}', widget does not exist.")
-            return
-
-        s3_client.delete_object(Bucket=bucket_name, Key=widget_path)
-        logger.info(f"Deleted Widget {request_data['widgetId']}")
+        delete_widget_s3(logger, request_data, widget_loc)
     else:
-        # widget is in a dynamodb table
-        pass
+        delete_widget_dynamodb(logger, request_data, widget_loc)
 
+
+def delete_widget_s3(logger, request_data: dict[str: str], widget_loc: dict[str: str]) -> None:
+    # widget is in an s3 bucket
+    s3_client = boto3.client('s3')
+
+    bucket_owner = request_data['owner'].replace(" ", "-").lower()
+    widget_path = f"widgets/{bucket_owner}/"
+    bucket_name = widget_loc["WIDGET_BUCKET"]
+
+    try:
+        s3_client.get_object(Bucket=bucket_name, Key=widget_path)
+    except s3_client.exceptions.NoSuchKey:
+        logger.warning(f"Widget '{widget_path}' does not exist in s3 bucket '{bucket_name}'.")
+        logger.warning(f"Could not delete widget '{request_data['widgetId']}', widget does not exist.")
+        return
+
+    s3_client.delete_object(Bucket=bucket_name, Key=widget_path)
+    logger.info(f"Deleted Widget '{request_data['widgetId']}'")
+
+
+def delete_widget_dynamodb(logger, request_data: dict[str: str], widget_loc: dict[str: str]) -> None:
+    dynamodb_client = boto3.client("dynamodb")
+    widget_obj = create_widget(logger, request_data, log=False)
+
+    item_key = {"id": {'S': widget_obj["widgetId"]}}
+
+    response = dynamodb_client.get_item(TableName=widget_loc["DYNAMODB_TABLE"], Key=item_key)
+    if 'Item' not in response.keys():
+        logger.warning(f"Could not delete widget '{request_data['widgetId']}', widget does not exist.")
+        return
+
+    dynamodb_client.delete_item(TableName=widget_loc["DYNAMODB_TABLE"], Key=item_key)
+    logger.info(f"Deleted Widget {request_data['widgetId']}")
 
 
 def update_widget(logger, request_data: dict[str: str]):
     new_widget = {"widgetId": request_data["widgetId"],
-                  "owner": request_data["owner"],
-                  "description": request_data["description"]}
+                  "owner": request_data["owner"]}
 
     if 'otherAttributes' in request_data.keys():
         new_widget["otherAttributes"] = request_data["otherAttributes"]
@@ -55,7 +75,10 @@ def update_widget(logger, request_data: dict[str: str]):
     if 'label' in request_data.keys():
         new_widget["label"] = request_data["label"]
 
-    logger.info(f"Updated Widget {new_widget['widgetId']}")
+    if "description" in request_data.keys():
+        new_widget["description"] = request_data["description"]
+
+    logger.info(f"Updated Widget '{new_widget['widgetId']}'")
     return new_widget
 
 
@@ -63,7 +86,7 @@ def get_next_request(logger, user_info: dict[str: str]) -> (dict[str: str], int)
     if user_info["REQUEST_BUCKET"]:
         return get_request_s3(logger, user_info["REQUEST_BUCKET"])
     else:
-        return get_request_sqs(logger, user_info["SQS_QUEUE"])
+        return get_request_sqs(logger, user_info["REQUEST_QUEUE"])
 
 
 def get_request_s3(logger, bucket_name):
@@ -84,16 +107,30 @@ def get_request_s3(logger, bucket_name):
     request = json.loads(object_content)
     request['key'] = request_key
 
-    logger.debug(f"Retrieved request {request['widgetId']}")
+    logger.debug(f"Retrieved request '{request['widgetId']}' from s3 bucket '{bucket_name}'")
 
     return request
 
 
 def get_request_sqs(logger, sqs_queue):
-    widget = {"widgetID": "<Id goes here>"}
-    logger.debug(f"Retrieved request {widget['widgetId']}")
+    sqs_client = boto3.client('sqs')
 
-    return None
+    try:
+        response = sqs_client.receive_message(QueueUrl=sqs_queue)
+        if 'Messages' not in response.keys():
+            return None
+        request_str = response["Messages"][0]["Body"]
+        request = json.loads(request_str)
+
+        request['receipt_handle'] = response["Messages"][0]["ReceiptHandle"]
+    except sqs_client.exceptions.InvalidAddress:
+        logger.warning(f"'{sqs_queue}' is an invalid URL, unable to retrieve requests.")
+        return None
+    except IndexError:
+        return None
+
+    logger.debug(f"Retrieved request '{request['widgetId']}' from SQS Queue '{sqs_queue}'")
+    return request
 
 
 def save_widget(logger, widget_obj, widget_loc):
@@ -113,7 +150,7 @@ def save_to_s3(logger, widget_obj: dict[str: str], bucket_name: str) -> None:
     widget = json.dumps(widget_obj)
     s3_client.put_object(Bucket=bucket_name, Key=widget_path, Body=widget)
 
-    logger.debug(f"Uploaded widget in {widget_path} as {widget_obj['widgetId']}.json")
+    logger.debug(f"Uploaded widget in s3 bucket '{bucket_name}' in '{widget_path}' as '{widget_obj['widgetId']}.json'")
 
 
 def save_to_dynamodb(logger, widget_obj: dict[str: str], table_name: str) -> None:
@@ -127,9 +164,11 @@ def save_to_dynamodb(logger, widget_obj: dict[str: str], table_name: str) -> Non
         item_dict[attr] = {"S": widget_obj[attr]}
 
     if "otherAttributes" in widget_obj.keys():
-        for table in widget_obj["otherAttributes"]:
-            for attr in table:
-                item_dict[attr] = {"S": table[attr]}
+        for attr_pair in widget_obj["otherAttributes"]:
+            key = attr_pair['name']
+            value = attr_pair['value']
+
+            item_dict[key] = {"S": value}
 
     dynamodb_client.put_item(TableName=table_name, Item=item_dict)
     logger.debug(f"Uploaded widget in '{table_name}' table as {widget_obj['widgetId']}")
@@ -140,13 +179,16 @@ def delete_request(logger, request_data: dict[str: str], request_loc: dict["str"
         bucket = request_loc["REQUEST_BUCKET"]
         key = request_data["key"]
 
-        # print(bucket, key)
-
         s3_client = boto3.client('s3')
         s3_client.delete_object(Bucket=bucket, Key=key)
-        logger.debug(f"Deleted Request {request_data['requestId']}")
+        logger.debug(f"Deleted Request {request_data['requestId']} from s3 bucket {bucket}.")
     else:
         sqs_client = boto3.client('sqs')
+        queue_url = request_loc['REQUEST_QUEUE']
+        request_key = request_data['receipt_handle']
+
+        sqs_client.delete_message(QueueUrl=queue_url, ReceiptHandle=request_key)
+        logger.debug(f"Deleted Request {request_data['requestId']} from sqs queue {queue_url}.")
 
 
 def process_request(logger, request: dict[str: str], user_info: dict["str": "str"]) -> None:
@@ -170,14 +212,15 @@ def process_request(logger, request: dict[str: str], user_info: dict["str": "str
 
 
 def is_valid_request(logger, request: dict[str: str]) -> bool:
-    with open("widgetRequest-schema.json") as schema_file:
+    with open("../widgetRequest-schema.json") as schema_file:
         schema = json.load(schema_file)
-
-        for key in schema['required']:
-            if key not in request:
-                logger.warning(f"Request Missing '{key}', Skipping...")
-                return False
-    return True
+        try:
+            jsonschema.validate(request, schema)
+            logger.debug(f"Validated Request {request['requestId']}")
+            return True
+        except jsonschema.exceptions.ValidationError:
+            logger.warning(f"Request {request['requestId']} could not be validated, skipping this request...")
+            return False
 
 
 def create_logger(debug, save_file) -> logging.Logger:
@@ -199,7 +242,7 @@ def create_logger(debug, save_file) -> logging.Logger:
 
 
 def main(user_info: dict[str: str]) -> None:
-    logger = create_logger(user_info["DEBUG"], "logs/consumer.log")
+    logger = create_logger(user_info["DEBUG"], "consumer.log")
 
     curr_wait_time = 0
     while curr_wait_time <= user_info["MAX_WAIT_TIME"]:
@@ -211,7 +254,7 @@ def main(user_info: dict[str: str]) -> None:
 
             process_request(logger, request, user_info)
 
-            logger.debug(f"Fulfilled request '{request['requestId']}', finding next request...\n")
+            logger.debug(f"Fulfilled request '{request['requestId']}'\n")
             curr_wait_time = 0
         else:
             time.sleep(0.1)

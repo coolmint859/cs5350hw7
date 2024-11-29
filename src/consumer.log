@@ -1,0 +1,2 @@
+20:46:06 INFO botocore.credentials: Found credentials in shared credentials file: ~/.aws/credentials
+20:46:23 INFO __main__: No new requests found within the last 3 seconds, terminating program.

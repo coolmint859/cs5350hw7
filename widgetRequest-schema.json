@@ -4,7 +4,7 @@
   "properties": {
     "type": {
       "type": "string",
-      "pattern": "WidgetCreateRequest|WidgetDeleteRequest|WidgetUpdateRequest"
+      "pattern": "create|delete|update"
     },
     "requestId": {
       "type": "string"

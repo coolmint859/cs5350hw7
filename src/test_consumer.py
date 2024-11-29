@@ -1,11 +1,12 @@
 import unittest
+import os
 from src import consumer
 import json
 import boto3
 
 
 def get_test_sample_requests():
-    request_files = ["1612306369907", "1612306370839", "1612306372496"]
+    request_files = os.listdir("sample-requests")
 
     requests = []
     for file in request_files:
@@ -69,6 +70,7 @@ class TestConsumer(unittest.TestCase):
         requests = get_test_sample_requests()
 
         for request in requests:
+
             expected_widget = {
                 "widgetId": request["widgetId"],
                 "owner": request["owner"],
@@ -81,7 +83,12 @@ class TestConsumer(unittest.TestCase):
             self.assertEqual(widget, expected_widget)
 
 
-    def test_delete_widget(self):
+    def test_delete_widget_s3(self):
+        # logger = consumer.create_logger(True, "logs/test_consumer.log")
+        # requests = get_test_sample_requests()
+        #
+        # for request in requests:
+        #     widget = consumer.create_widget(logger, request)
         pass
 
     def test_update_widget(self):
@@ -94,9 +101,10 @@ class TestConsumer(unittest.TestCase):
 
         widgets = []
         for request in requests:
-            widget = consumer.create_widget(logger, request)
-            consumer.save_to_s3(logger, widget, bucket_name)
-            widgets.append(widget)
+            if consumer.is_valid_request(logger, request):
+                widget = consumer.create_widget(logger, request)
+                consumer.save_to_s3(logger, widget, bucket_name)
+                widgets.append(widget)
 
         s3_widgets = get_objects_s3(bucket_name)
 
@@ -111,6 +119,8 @@ class TestConsumer(unittest.TestCase):
 
         widgets = []
         for request in requests:
+            if not consumer.is_valid_request(logger, request):
+                continue
             widget = consumer.create_widget(logger, request)
             consumer.save_to_dynamodb(logger, widget, table_name)
             widgets.append(flatten_obj(widget))
