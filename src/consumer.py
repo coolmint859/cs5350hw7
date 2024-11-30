@@ -32,18 +32,16 @@ def delete_widget(logger, request_data: dict[str: str], widget_loc: dict[str: st
 
 
 def delete_widget_s3(logger, request_data: dict[str: str], widget_loc: dict[str: str]) -> None:
-    # widget is in an s3 bucket
     s3_client = boto3.client('s3')
 
     bucket_owner = request_data['owner'].replace(" ", "-").lower()
-    widget_path = f"widgets/{bucket_owner}/"
+    widget_path = f"widgets/{bucket_owner}/{request_data['widgetId']}"
     bucket_name = widget_loc["WIDGET_BUCKET"]
 
     try:
         s3_client.get_object(Bucket=bucket_name, Key=widget_path)
     except s3_client.exceptions.NoSuchKey:
         logger.warning(f"Widget '{widget_path}' does not exist in s3 bucket '{bucket_name}'.")
-        logger.warning(f"Could not delete widget '{request_data['widgetId']}', widget does not exist.")
         return
 
     s3_client.delete_object(Bucket=bucket_name, Key=widget_path)
@@ -145,7 +143,7 @@ def save_to_s3(logger, widget_obj: dict[str: str], bucket_name: str) -> None:
 
     bucket_owner = widget_obj['owner'].replace(" ", "-").lower()
 
-    widget_path = f"widgets/{bucket_owner}/"
+    widget_path = f"widgets/{bucket_owner}/{widget_obj['widgetId']}"
 
     widget = json.dumps(widget_obj)
     s3_client.put_object(Bucket=bucket_name, Key=widget_path, Body=widget)
@@ -212,7 +210,7 @@ def process_request(logger, request: dict[str: str], user_info: dict["str": "str
 
 
 def is_valid_request(logger, request: dict[str: str]) -> bool:
-    with open("../widgetRequest-schema.json") as schema_file:
+    with open("./schemas/request-schema.json") as schema_file:
         schema = json.load(schema_file)
         try:
             jsonschema.validate(request, schema)
@@ -223,7 +221,7 @@ def is_valid_request(logger, request: dict[str: str]) -> bool:
             return False
 
 
-def create_logger(debug, save_file) -> logging.Logger:
+def create_logger(debug: bool, save_file: str) -> logging.Logger:
     logger = logging.getLogger(__name__)
     logformatter = logging.Formatter("{asctime} {levelname} {name}: {message}", style='{')
     consoleHandler = logging.StreamHandler()
@@ -242,7 +240,7 @@ def create_logger(debug, save_file) -> logging.Logger:
 
 
 def main(user_info: dict[str: str]) -> None:
-    logger = create_logger(user_info["DEBUG"], "consumer.log")
+    logger = create_logger(debug=user_info["DEBUG"], save_file="./logs/consumer.log")
 
     curr_wait_time = 0
     while curr_wait_time <= user_info["MAX_WAIT_TIME"]:
