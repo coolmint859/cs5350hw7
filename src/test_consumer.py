@@ -40,7 +40,7 @@ def get_test_sample_requests(request_type=None):
     return requests
 
 
-# retrieves a list of the objects stored in the given s3 buckets (assumes permissions)
+# retrieves a list of objects stored in a given s3 bucket (assumes permissions)
 def get_objects_s3(bucket_name):
     s3_client = boto3.client('s3')
 
@@ -55,7 +55,7 @@ def get_objects_s3(bucket_name):
     return widgets
 
 
-# retrieves a list of the items stored in the given dynamodb table (assumes permissions)
+# retrieves a list of items stored in a given dynamodb table (assumes permissions)
 def get_objects_dynamodb(table_name):
     dynamodb_client = boto3.client('dynamodb')
     paginator = dynamodb_client.get_paginator('scan')
@@ -88,6 +88,7 @@ def flatten_obj(data_obj):
 
 class TestConsumer(unittest.TestCase):
 
+    # tests creating widget by comparing it against a schema
     def test_create_widget(self):
         requests = get_test_sample_requests(request_type='create')
 
@@ -102,6 +103,7 @@ class TestConsumer(unittest.TestCase):
                     valid_widget = False
                 self.assertTrue(valid_widget)
 
+    # tests updating a widget by comparing it against a schema
     def test_update_widget(self):
         requests = get_test_sample_requests(request_type='update')
 
@@ -116,6 +118,7 @@ class TestConsumer(unittest.TestCase):
                     valid_widget = False
                 self.assertTrue(valid_widget)
 
+    # tests deleting widgets from an s3 bucket based on delete requests
     def test_delete_widget_s3(self):
         delete_requests = get_test_sample_requests(request_type='delete')
         create_requests = get_test_sample_requests(request_type='create')
@@ -130,9 +133,7 @@ class TestConsumer(unittest.TestCase):
         deleted_widget_ids = []
         for dt_request in delete_requests:
             deleted_widget_ids.append(dt_request["widgetId"])
-
-            widget_loc = {"WIDGET_BUCKET": widget_bucket}
-            consumer.delete_widget_s3(logger, dt_request, widget_loc)
+            consumer.delete_widget_s3(logger, dt_request, widget_bucket)
 
         # get objects in the s3 bucket
         s3_widgets = get_objects_s3(widget_bucket)
@@ -142,11 +143,11 @@ class TestConsumer(unittest.TestCase):
         for widget_id in deleted_widget_ids:
             self.assertNotIn(widget_id, s3_widget_ids)
 
+    # tests deleting widgets from a dynamodb table based on delete requests
     def test_delete_widget_dynamodb(self):
         delete_requests = get_test_sample_requests(request_type='delete')
         create_requests = get_test_sample_requests(request_type='create')
         table_name = "widgets"
-        widget_loc = {"DYNAMODB_TABLE": table_name}
 
         # upload widgets to dynamodb table
         for cr_request in create_requests:
@@ -157,8 +158,7 @@ class TestConsumer(unittest.TestCase):
         deleted_widget_ids = []
         for dt_request in delete_requests:
             deleted_widget_ids.append(dt_request["widgetId"])
-
-            consumer.delete_widget_dynamodb(logger, dt_request, widget_loc)
+            consumer.delete_widget_dynamodb(logger, dt_request, table_name)
 
         # get objects in the dynamodb table
         dynamodb_widgets = get_objects_dynamodb(table_name)
@@ -168,6 +168,7 @@ class TestConsumer(unittest.TestCase):
         for widget_id in deleted_widget_ids:
             self.assertNotIn(widget_id, dynamodb_widget_ids)
 
+    # tests retrieval of requests from a s3 bucket
     def test_get_request_s3(self):
         requests = get_test_sample_requests()
         request_bucket = "usu-cs5250-coolmint-requests"
@@ -175,7 +176,6 @@ class TestConsumer(unittest.TestCase):
             "REQUEST_QUEUE": None,
             "REQUEST_BUCKET": request_bucket
         }
-
 
         s3_client = boto3.client('s3')
         for request in requests:
@@ -193,6 +193,7 @@ class TestConsumer(unittest.TestCase):
             local_request_id = local_request['requestId']
             self.assertIn(local_request_id, s3_request_ids)
 
+    # tests retrieval of requests from sqs queue
     def test_get_request_sqs(self):
         requests = get_test_sample_requests()
         sqs_queue = "https://sqs.us-east-1.amazonaws.com/767843770882/cs5250-requests"
@@ -217,6 +218,7 @@ class TestConsumer(unittest.TestCase):
             local_request_id = local_request['requestId']
             self.assertIn(local_request_id, sqs_request_ids)
 
+    # tests the saving of widgets into a s3 bucket
     def test_save_to_s3(self):
         requests = get_test_sample_requests(request_type='create')
         bucket_name = "usu-cs5250-coolmint-web"
@@ -232,7 +234,7 @@ class TestConsumer(unittest.TestCase):
         for widget in widgets:
             self.assertIn(widget, s3_widgets)
 
-
+    # tests the saving of widgets into a dynamodb table
     def test_save_to_dynamodb(self):
         requests = get_test_sample_requests(request_type='create')
         table_name = "widgets"
