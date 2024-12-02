@@ -1,0 +1,3 @@
+boto3==1.35.35
+click==8.1.7
+jsonschema==4.19.0

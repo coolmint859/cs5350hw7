@@ -41,8 +41,8 @@ def get_test_sample_requests(request_type=None):
 
 
 # retrieves a list of objects stored in a given s3 bucket (assumes permissions)
-def get_objects_s3(bucket_name):
-    s3_client = boto3.client('s3')
+def get_objects_s3(bucket_name, region):
+    s3_client = boto3.client('s3', region_name=region)
 
     s3_data = s3_client.list_objects_v2(Bucket=bucket_name).get("Contents")
     keys = [obj["Key"] for obj in list(s3_data)][2:]
@@ -56,8 +56,8 @@ def get_objects_s3(bucket_name):
 
 
 # retrieves a list of items stored in a given dynamodb table (assumes permissions)
-def get_objects_dynamodb(table_name):
-    dynamodb_client = boto3.client('dynamodb')
+def get_objects_dynamodb(table_name, region):
+    dynamodb_client = boto3.client('dynamodb', region_name=region)
     paginator = dynamodb_client.get_paginator('scan')
 
     widgets = []
@@ -123,20 +123,21 @@ class TestConsumer(unittest.TestCase):
         delete_requests = get_test_sample_requests(request_type='delete')
         create_requests = get_test_sample_requests(request_type='create')
         widget_bucket = "usu-cs5250-coolmint-web"
+        region = "us-east-1"
 
         # upload widgets to s3 bucket
         for cr_request in create_requests:
             widget = consumer.create_widget(logger, cr_request)
-            consumer.save_to_s3(logger, widget, widget_bucket)
+            consumer.save_to_s3(logger, widget, widget_bucket, region)
 
         # delete widgets
         deleted_widget_ids = []
         for dt_request in delete_requests:
             deleted_widget_ids.append(dt_request["widgetId"])
-            consumer.delete_widget_s3(logger, dt_request, widget_bucket)
+            consumer.delete_widget_s3(logger, dt_request, widget_bucket, region)
 
         # get objects in the s3 bucket
-        s3_widgets = get_objects_s3(widget_bucket)
+        s3_widgets = get_objects_s3(widget_bucket, region)
         s3_widget_ids = [obj['widgetId'] for obj in s3_widgets]
 
         # assure that no widget deleted is found in the s3 bucket
@@ -148,20 +149,21 @@ class TestConsumer(unittest.TestCase):
         delete_requests = get_test_sample_requests(request_type='delete')
         create_requests = get_test_sample_requests(request_type='create')
         table_name = "widgets"
+        region = "us-east-1"
 
         # upload widgets to dynamodb table
         for cr_request in create_requests:
             widget = consumer.create_widget(logger, cr_request)
-            consumer.save_to_dynamodb(logger, widget, table_name)
+            consumer.save_to_dynamodb(logger, widget, table_name, region)
 
         # delete widgets
         deleted_widget_ids = []
         for dt_request in delete_requests:
             deleted_widget_ids.append(dt_request["widgetId"])
-            consumer.delete_widget_dynamodb(logger, dt_request, table_name)
+            consumer.delete_widget_dynamodb(logger, dt_request, table_name, region)
 
         # get objects in the dynamodb table
-        dynamodb_widgets = get_objects_dynamodb(table_name)
+        dynamodb_widgets = get_objects_dynamodb(table_name, region)
         dynamodb_widget_ids = [obj['id'] for obj in dynamodb_widgets]
 
         # assure that no widget deleted is found in the dynamodb table
@@ -172,22 +174,23 @@ class TestConsumer(unittest.TestCase):
     def test_get_request_s3(self):
         requests = get_test_sample_requests()
         request_bucket = "usu-cs5250-coolmint-requests"
+        region = "us-east-1"
         request_loc = {
             "REQUEST_QUEUE": None,
             "REQUEST_BUCKET": request_bucket
         }
 
-        s3_client = boto3.client('s3')
+        s3_client = boto3.client('s3', region_name=region)
         for request in requests:
             request_str = json.dumps(request)
             s3_client.put_object(Bucket=request_bucket, Key=request['requestId'], Body=request_str)
 
-        request = consumer.get_request_s3(logger, request_bucket)
+        request = consumer.get_request_s3(logger, request_bucket, region)
         s3_request_ids = []
         while request is not None:
             s3_request_ids.append(request['requestId'])
-            consumer.delete_request(logger, request, request_loc)
-            request = consumer.get_request_s3(logger, request_bucket)
+            consumer.delete_request(logger, request, request_loc, region)
+            request = consumer.get_request_s3(logger, request_bucket, region)
 
         for local_request in requests:
             local_request_id = local_request['requestId']
@@ -197,22 +200,23 @@ class TestConsumer(unittest.TestCase):
     def test_get_request_sqs(self):
         requests = get_test_sample_requests()
         sqs_queue = "https://sqs.us-east-1.amazonaws.com/767843770882/cs5250-requests"
+        region = "us-east-1"
         request_loc = {
             "REQUEST_QUEUE": sqs_queue,
             "REQUEST_BUCKET": None
         }
 
-        sqs_client = boto3.client('sqs')
+        sqs_client = boto3.client('sqs', region_name=region)
         for request in requests:
             request_str = json.dumps(request)
             sqs_client.send_message(QueueUrl=sqs_queue, MessageBody=request_str)
 
-        request = consumer.get_request_sqs(logger, sqs_queue)
+        request = consumer.get_request_sqs(logger, sqs_queue, region)
         sqs_request_ids = []
         while request is not None:
             sqs_request_ids.append(request['requestId'])
-            consumer.delete_request(logger, request, request_loc)
-            request = consumer.get_request_sqs(logger, sqs_queue)
+            consumer.delete_request(logger, request, request_loc, region)
+            request = consumer.get_request_sqs(logger, sqs_queue, region)
 
         for local_request in requests:
             local_request_id = local_request['requestId']
@@ -222,14 +226,15 @@ class TestConsumer(unittest.TestCase):
     def test_save_to_s3(self):
         requests = get_test_sample_requests(request_type='create')
         bucket_name = "usu-cs5250-coolmint-web"
+        region = "us-east-1"
 
         widgets = []
         for request in requests:
             widget_obj = consumer.create_widget(logger, request)
-            consumer.save_to_s3(logger, widget_obj, bucket_name)
+            consumer.save_to_s3(logger, widget_obj, bucket_name, region)
             widgets.append(widget_obj)
 
-        s3_widgets = get_objects_s3(bucket_name)
+        s3_widgets = get_objects_s3(bucket_name, region)
 
         for widget in widgets:
             self.assertIn(widget, s3_widgets)
@@ -238,14 +243,15 @@ class TestConsumer(unittest.TestCase):
     def test_save_to_dynamodb(self):
         requests = get_test_sample_requests(request_type='create')
         table_name = "widgets"
+        region = "us-east-1"
 
         widgets = []
         for request in requests:
             widget = consumer.create_widget(logger, request)
-            consumer.save_to_dynamodb(logger, widget, table_name)
+            consumer.save_to_dynamodb(logger, widget, table_name, region)
             widgets.append(flatten_obj(widget))
 
-        dynamodb_widgets = get_objects_dynamodb(table_name)
+        dynamodb_widgets = get_objects_dynamodb(table_name, region)
 
         for widget in widgets:
             self.assertIn(widget, dynamodb_widgets)

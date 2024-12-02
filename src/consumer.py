@@ -20,16 +20,16 @@ def create_widget(logger, request_data: dict[str: str], log=True) -> dict[str: s
 
 
 # wrapper method for deleting a widget from a specified location
-def delete_widget(logger, request_data: dict[str: str], widget_loc: dict[str: str]) -> None:
+def delete_widget(logger, request_data: dict[str: str], widget_loc: dict[str: str], region: str) -> None:
     if widget_loc["WIDGET_BUCKET"]:
-        delete_widget_s3(logger, request_data, widget_loc["WIDGET_BUCKET"])
+        delete_widget_s3(logger, request_data, widget_loc["WIDGET_BUCKET"], region)
     else:
-        delete_widget_dynamodb(logger, request_data, widget_loc["DYNAMODB_TABLE"])
+        delete_widget_dynamodb(logger, request_data, widget_loc["DYNAMODB_TABLE"], region)
 
 
 # deletes a widget from an s3 bucket, if the widget exists
-def delete_widget_s3(logger, request_data: dict[str: str], widget_bucket: str) -> None:
-    s3_client = boto3.client('s3')
+def delete_widget_s3(logger, request_data: dict[str: str], widget_bucket: str, region: str) -> None:
+    s3_client = boto3.client('s3', region_name=region)
 
     bucket_owner = request_data['owner'].replace(" ", "-").lower()
     widget_path = f"widgets/{bucket_owner}/{request_data['widgetId']}"
@@ -45,8 +45,8 @@ def delete_widget_s3(logger, request_data: dict[str: str], widget_bucket: str) -
 
 
 # deletes a widget from a dynamodb table, if the widget exists
-def delete_widget_dynamodb(logger, request_data: dict[str: str], widget_table: str) -> None:
-    dynamodb_client = boto3.client("dynamodb")
+def delete_widget_dynamodb(logger, request_data: dict[str: str], widget_table: str, region: str) -> None:
+    dynamodb_client = boto3.client("dynamodb", region_name=region)
     widget_obj = create_widget(logger, request_data, log=False)
 
     item_key = {"id": {'S': widget_obj["widgetId"]}}
@@ -57,7 +57,7 @@ def delete_widget_dynamodb(logger, request_data: dict[str: str], widget_table: s
         return
 
     dynamodb_client.delete_item(TableName=widget_table, Key=item_key)
-    logger.info(f"Deleted Widget {request_data['widgetId']}")
+    logger.info(f"Deleted Widget '{request_data['widgetId']}'")
 
 
 # updates a widget from the given request
@@ -73,16 +73,16 @@ def update_widget(logger, request_data: dict[str: str]):
 
 
 # wrapper method for retrieving requests
-def get_next_request(logger, request_loc: dict[str: str]) -> (dict[str: str], int):
+def get_next_request(logger, request_loc: dict[str: str], region: str) -> (dict[str: str], int):
     if request_loc["REQUEST_BUCKET"]:
-        return get_request_s3(logger, request_loc["REQUEST_BUCKET"])
+        return get_request_s3(logger, request_loc["REQUEST_BUCKET"], region)
     else:
-        return get_request_sqs(logger, request_loc["REQUEST_QUEUE"])
+        return get_request_sqs(logger, request_loc["REQUEST_QUEUE"], region)
 
 
 # retrieves a request from an s3 bucket. If no request is found, returns None
-def get_request_s3(logger, bucket_name: str) -> dict[str: str]:
-    s3_client = boto3.client('s3')
+def get_request_s3(logger, bucket_name: str, region: str) -> dict[str: str]:
+    s3_client = boto3.client('s3', region_name=region)
 
     # list_objects_v2 appears to always list in ascending order (likely the order the objects were uploaded),
     # so the first object in the list will always be the one with the smallest key
@@ -105,8 +105,8 @@ def get_request_s3(logger, bucket_name: str) -> dict[str: str]:
 
 
 # retrieves a request from an sqs queue. If no request is found, returns None
-def get_request_sqs(logger, sqs_queue: str) -> dict[str: str]:
-    sqs_client = boto3.client('sqs')
+def get_request_sqs(logger, sqs_queue: str, region: str) -> dict[str: str]:
+    sqs_client = boto3.client('sqs', region_name=region)
 
     try:
         response = sqs_client.receive_message(QueueUrl=sqs_queue, VisibilityTimeout=5)
@@ -127,16 +127,16 @@ def get_request_sqs(logger, sqs_queue: str) -> dict[str: str]:
 
 
 # wrapper method for saving a widget
-def save_widget(logger, widget_obj: dict[str: str], widget_loc: dict[str: str]) -> None:
+def save_widget(logger, widget_obj: dict[str: str], widget_loc: dict[str: str], region: str) -> None:
     if widget_loc["WIDGET_BUCKET"]:
-        save_to_s3(logger, widget_obj, widget_loc["WIDGET_BUCKET"])
+        save_to_s3(logger, widget_obj, widget_loc["WIDGET_BUCKET"], region)
     else:
-        save_to_dynamodb(logger, widget_obj, widget_loc["DYNAMODB_TABLE"])
+        save_to_dynamodb(logger, widget_obj, widget_loc["DYNAMODB_TABLE"], region)
 
 
 # saves the given widget object into an s3 bucket. If the widget already exists, this method overwrites it.
-def save_to_s3(logger, widget_obj: dict[str: str], bucket_name: str) -> None:
-    s3_client = boto3.client('s3')
+def save_to_s3(logger, widget_obj: dict[str: str], bucket_name: str, region: str) -> None:
+    s3_client = boto3.client('s3', region_name=region)
 
     bucket_owner = widget_obj['owner'].replace(" ", "-").lower()
     widget_path = f"widgets/{bucket_owner}/{widget_obj['widgetId']}"
@@ -148,8 +148,8 @@ def save_to_s3(logger, widget_obj: dict[str: str], bucket_name: str) -> None:
 
 
 # saves the given widget object into a dynamodb table. if the widget already exists, this method overwrites it.
-def save_to_dynamodb(logger, widget_obj: dict[str: str], table_name: str) -> None:
-    dynamodb_client = boto3.client("dynamodb")
+def save_to_dynamodb(logger, widget_obj: dict[str: str], table_name: str, region: str) -> None:
+    dynamodb_client = boto3.client("dynamodb", region_name=region)
 
     item_dict = {
         "id": {'S': widget_obj["widgetId"]}
@@ -172,16 +172,16 @@ def save_to_dynamodb(logger, widget_obj: dict[str: str], table_name: str) -> Non
 
 
 # deletes a request from an s3 queue or SQS Queue.
-def delete_request(logger, request_data: dict[str: str], request_loc: dict["str": str]) -> None:
+def delete_request(logger, request_data: dict[str: str], request_loc: dict["str": str], region: str) -> None:
     if request_loc["REQUEST_BUCKET"]:
         bucket = request_loc["REQUEST_BUCKET"]
         key = request_data["key"]
 
-        s3_client = boto3.client('s3')
+        s3_client = boto3.client('s3', region_name=region)
         s3_client.delete_object(Bucket=bucket, Key=key)
         logger.debug(f"Deleted Request {request_data['requestId']} from s3 bucket {bucket}.")
     else:
-        sqs_client = boto3.client('sqs')
+        sqs_client = boto3.client('sqs', region_name=region)
         queue_url = request_loc['REQUEST_QUEUE']
         request_key = request_data['receipt_handle']
 
@@ -190,20 +190,20 @@ def delete_request(logger, request_data: dict[str: str], request_loc: dict["str"
 
 
 # wrapper function that directs the program to do specific things depending on what type the request is
-def process_request(logger, request: dict[str: str], user_info: dict["str": "str"]) -> None:
+def process_request(logger, request: dict[str: str], user_info: dict["str": "str"], region: str) -> None:
     if request['type'] == 'create':
         widget = create_widget(logger, request)
-        save_widget(logger, widget, user_info["WIDGET_LOC"])
-        delete_request(logger, request, user_info["REQUEST_LOC"])
+        save_widget(logger, widget, user_info["WIDGET_LOC"], region)
+        delete_request(logger, request, user_info["REQUEST_LOC"], region)
 
     elif request['type'] == 'update':
         widget = update_widget(logger, request)
-        save_widget(logger, widget, user_info["WIDGET_LOC"])
-        delete_request(logger, request, user_info["REQUEST_LOC"])
+        save_widget(logger, widget, user_info["WIDGET_LOC"], region)
+        delete_request(logger, request, user_info["REQUEST_LOC"], region)
 
     elif request['type'] == 'delete':
-        delete_widget(logger, request, user_info["WIDGET_LOC"])
-        delete_request(logger, request, user_info["REQUEST_LOC"])
+        delete_widget(logger, request, user_info["WIDGET_LOC"], region)
+        delete_request(logger, request, user_info["REQUEST_LOC"], region)
 
     else:
         logger.warning(f"Widget Type '{request['type']}' is an Invalid Type, Skipping...")
@@ -247,12 +247,12 @@ def main(user_info: dict[str: str]) -> None:
 
     curr_failed_requests = 0
     while curr_failed_requests <= user_info["MAX_REQUEST_LIMIT"]:
-        request = get_next_request(logger, user_info["REQUEST_LOC"])
+        request = get_next_request(logger, user_info["REQUEST_LOC"], user_info["REGION"])
         if request is not None:
             if not is_valid_request(logger, request):
                 continue
 
-            process_request(logger, request, user_info)
+            process_request(logger, request, user_info, user_info["REGION"])
 
             logger.debug(f"Fulfilled request '{request['requestId']}'\n")
             curr_failed_requests = 0
@@ -264,6 +264,7 @@ def main(user_info: dict[str: str]) -> None:
 
 # entry point of the program - packages the given user data into a dictionary to be used throughout the program
 @click.group(invoke_without_command=True)
+@click.option("--region", help="The region of the aws service instances")
 @click.option("--request-bucket", "-rb", help="Name of the s3 bucket that may contain requests.")
 @click.option("--request-queue", "-rq", help="URL of the SQS queue that may contain requests.")
 @click.option("--widget-bucket", "-wb", help="Name of the s3 bucket that may contain widgets.")
@@ -272,7 +273,7 @@ def main(user_info: dict[str: str]) -> None:
               help="The max number of failed request polls before terminating")
 @click.option("--debug/--no-debug", default=False,
               help="If set, will print information about fetching and processing requests.")
-def cli(request_bucket, request_queue, widget_bucket, dynamodb_table, max_request_limit, debug):
+def cli(region, request_bucket, request_queue, widget_bucket, dynamodb_table, max_request_limit, debug):
     if (widget_bucket and dynamodb_table) or (request_bucket and request_queue):
         logging.error("Mismatched Options. To see more information, type '--help'.")
         return
@@ -293,7 +294,8 @@ def cli(request_bucket, request_queue, widget_bucket, dynamodb_table, max_reques
             "DYNAMODB_TABLE": dynamodb_table
         },
         "MAX_REQUEST_LIMIT": max_request_limit,
-        "DEBUG": debug
+        "DEBUG": debug,
+        "REGION": region
     }
 
     main(user_info)
