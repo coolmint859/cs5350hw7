@@ -1,0 +1,12 @@
+1. Why is possible that Update and Delete Widget Requests may fail, even when you were
+   running just one Consumer?
+
+    A: I'm not too sure. I want to imagine it has something to do with the containerization. Maybe having it need to
+       work in an isolated environment with it's own kernel causes some update/delete requests to finish on aws's side
+       before the program can remove them from the queue or s3 bucket.
+
+2. How would this possible behavior impact the design of distributed applications that use
+   queues?
+
+    A: Probably would mean that the need for dead-letter queues become especially important. Or the developers would need
+       to have some kind of mechanism to deal with out-of-date requests that come into the queue.
